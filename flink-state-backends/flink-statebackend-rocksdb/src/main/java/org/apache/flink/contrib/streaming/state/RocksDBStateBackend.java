@@ -121,10 +121,10 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 	private final TernaryBoolean enableIncrementalCheckpointing;
 
 	/** This determines the type of priority queue state. */
-	private PriorityQueueStateType priorityQueueStateType;
+	private final PriorityQueueStateType priorityQueueStateType;
 
 	/** The default rocksdb metrics options. */
-	private RocksDBNativeMetricOptions defaultMetricOptions;
+	private final RocksDBNativeMetricOptions defaultMetricOptions;
 
 	// -- runtime values, set on TaskManager when initializing / using the backend
 
@@ -238,6 +238,9 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 	public RocksDBStateBackend(StateBackend checkpointStreamBackend, TernaryBoolean enableIncrementalCheckpointing) {
 		this.checkpointStreamBackend = checkNotNull(checkpointStreamBackend);
 		this.enableIncrementalCheckpointing = enableIncrementalCheckpointing;
+		// for now, we use still the heap-based implementation as default
+		this.priorityQueueStateType = PriorityQueueStateType.HEAP;
+		this.defaultMetricOptions = new RocksDBNativeMetricOptions();
 	}
 
 	/**
@@ -266,19 +269,17 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 		// reconfigure the state backend backing the streams
 		final StateBackend originalStreamBackend = original.checkpointStreamBackend;
 		this.checkpointStreamBackend = originalStreamBackend instanceof ConfigurableStateBackend ?
-				((ConfigurableStateBackend) originalStreamBackend).configure(config) :
-				originalStreamBackend;
+			((ConfigurableStateBackend) originalStreamBackend).configure(config) :
+			originalStreamBackend;
 
 		// configure incremental checkpoints
 		this.enableIncrementalCheckpointing = original.enableIncrementalCheckpointing.resolveUndefined(
 			config.getBoolean(CheckpointingOptions.INCREMENTAL_CHECKPOINTS));
 
-		if (original.priorityQueueStateType != null) {
-			this.priorityQueueStateType = original.priorityQueueStateType;
-		} else {
-			final String priorityQueueTypeString = config.getString(TIMER_SERVICE_FACTORY);
-			this.priorityQueueStateType = PriorityQueueStateType.valueOf(priorityQueueTypeString.toUpperCase());
-		}
+		final String priorityQueueTypeString = config.getString(TIMER_SERVICE_FACTORY);
+
+		this.priorityQueueStateType = priorityQueueTypeString.length() > 0 ?
+			PriorityQueueStateType.valueOf(priorityQueueTypeString.toUpperCase()) : original.priorityQueueStateType;
 
 		// configure local directories
 		if (original.localRocksDbDirectories != null) {
@@ -294,17 +295,13 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 				}
 				catch (IllegalArgumentException e) {
 					throw new IllegalConfigurationException("Invalid configuration for RocksDB state " +
-							"backend's local storage directories: " + e.getMessage(), e);
+						"backend's local storage directories: " + e.getMessage(), e);
 				}
 			}
 		}
 
 		// configure metric options
-		if (original.defaultMetricOptions != null) {
-			this.defaultMetricOptions = original.defaultMetricOptions;
-		} else {
-			this.defaultMetricOptions = RocksDBNativeMetricOptions.fromConfig(config);
-		}
+		this.defaultMetricOptions = RocksDBNativeMetricOptions.fromConfig(config);
 
 		// copy remaining settings
 		this.predefinedOptions = original.predefinedOptions;
@@ -344,8 +341,8 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 	}
 
 	private void lazyInitializeForJob(
-			Environment env,
-			@SuppressWarnings("unused") String operatorIdentifier) throws IOException {
+		Environment env,
+		@SuppressWarnings("unused") String operatorIdentifier) throws IOException {
 
 		if (isInitialized) {
 			return;
@@ -366,7 +363,7 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 				File testDir = new File(f, UUID.randomUUID().toString());
 				if (!testDir.mkdirs()) {
 					String msg = "Local DB files directory '" + f
-							+ "' does not exist and cannot be created. ";
+						+ "' does not exist and cannot be created. ";
 					LOG.error(msg);
 					errorMessage.append(msg);
 				} else {
@@ -416,15 +413,15 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 
 	@Override
 	public <K> AbstractKeyedStateBackend<K> createKeyedStateBackend(
-			Environment env,
-			JobID jobID,
-			String operatorIdentifier,
-			TypeSerializer<K> keySerializer,
-			int numberOfKeyGroups,
-			KeyGroupRange keyGroupRange,
-			TaskKvStateRegistry kvStateRegistry,
-			TtlTimeProvider ttlTimeProvider,
-			MetricGroup metricGroup) throws IOException {
+		Environment env,
+		JobID jobID,
+		String operatorIdentifier,
+		TypeSerializer<K> keySerializer,
+		int numberOfKeyGroups,
+		KeyGroupRange keyGroupRange,
+		TaskKvStateRegistry kvStateRegistry,
+		TtlTimeProvider ttlTimeProvider,
+		MetricGroup metricGroup) throws IOException {
 
 		// first, make sure that the RocksDB JNI library is loaded
 		// we do this explicitly here to have better error handling
@@ -444,35 +441,35 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 			env.getTaskStateManager().createLocalRecoveryConfig();
 
 		return new RocksDBKeyedStateBackend<>(
-				operatorIdentifier,
-				env.getUserClassLoader(),
-				instanceBasePath,
-				getDbOptions(),
-				getColumnOptions(),
-				kvStateRegistry,
-				keySerializer,
-				numberOfKeyGroups,
-				keyGroupRange,
-				env.getExecutionConfig(),
-				isIncrementalCheckpointsEnabled(),
-				localRecoveryConfig,
-				priorityQueueStateType,
-				ttlTimeProvider,
-				getMemoryWatcherOptions(),
-				metricGroup);
+			operatorIdentifier,
+			env.getUserClassLoader(),
+			instanceBasePath,
+			getDbOptions(),
+			getColumnOptions(),
+			kvStateRegistry,
+			keySerializer,
+			numberOfKeyGroups,
+			keyGroupRange,
+			env.getExecutionConfig(),
+			isIncrementalCheckpointsEnabled(),
+			localRecoveryConfig,
+			priorityQueueStateType,
+			ttlTimeProvider,
+			getMemoryWatcherOptions(),
+			metricGroup);
 	}
 
 	@Override
 	public OperatorStateBackend createOperatorStateBackend(
-			Environment env,
-			String operatorIdentifier) throws Exception {
+		Environment env,
+		String operatorIdentifier) throws Exception {
 
 		//the default for RocksDB; eventually there can be a operator state backend based on RocksDB, too.
 		final boolean asyncSnapshots = true;
 		return new DefaultOperatorStateBackend(
-				env.getUserClassLoader(),
-				env.getExecutionConfig(),
-				asyncSnapshots);
+			env.getUserClassLoader(),
+			env.getExecutionConfig(),
+			asyncSnapshots);
 	}
 
 	// ------------------------------------------------------------------------
@@ -696,10 +693,10 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 	@Override
 	public String toString() {
 		return "RocksDBStateBackend{" +
-				"checkpointStreamBackend=" + checkpointStreamBackend +
-				", localRocksDbDirectories=" + Arrays.toString(localRocksDbDirectories) +
-				", enableIncrementalCheckpointing=" + enableIncrementalCheckpointing +
-				'}';
+			"checkpointStreamBackend=" + checkpointStreamBackend +
+			", localRocksDbDirectories=" + Arrays.toString(localRocksDbDirectories) +
+			", enableIncrementalCheckpointing=" + enableIncrementalCheckpointing +
+			'}';
 	}
 
 	// ------------------------------------------------------------------------
