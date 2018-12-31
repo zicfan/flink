@@ -17,6 +17,7 @@
 
 package org.apache.flink.contrib.streaming.state;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
@@ -276,10 +277,13 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 		this.enableIncrementalCheckpointing = original.enableIncrementalCheckpointing.resolveUndefined(
 			config.getBoolean(CheckpointingOptions.INCREMENTAL_CHECKPOINTS));
 
-		final String priorityQueueTypeString = config.getString(TIMER_SERVICE_FACTORY);
+		final String priorityQueueTypeString = config.getString(TIMER_SERVICE_FACTORY, "");
 
-		this.priorityQueueStateType = priorityQueueTypeString.length() > 0 ?
-			PriorityQueueStateType.valueOf(priorityQueueTypeString.toUpperCase()) : original.priorityQueueStateType;
+		if (priorityQueueTypeString.length() > 0) {
+			this.priorityQueueStateType = PriorityQueueStateType.valueOf(priorityQueueTypeString.toUpperCase());
+		} else {
+			this.priorityQueueStateType = original.priorityQueueStateType;
+		}
 
 		// configure local directories
 		if (original.localRocksDbDirectories != null) {
